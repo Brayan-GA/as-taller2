@@ -7,6 +7,7 @@ Representa la capa "Controlador" en la arquitectura MVC.
 
 from flask import render_template, request, redirect, url_for, flash, jsonify
 from datetime import datetime
+from models import task
 from models.task import Task
 from app import db
 
@@ -46,9 +47,24 @@ def register_routes(app):
         # Obtener parámetros de filtro y ordenamiento
         filter_type = request.args.get('filter', 'all')
         sort_by = request.args.get('sort', 'created')
+        
+        query = Task.query
 
-        # Por ahora, solo mostrar una lista vacía
-        tasks = []
+        # Filtro por estado
+        if filter_type == 'pending':
+            query = query.filter_by(completed=False)
+        elif filter_type == 'completed':
+            query = query.filter_by(completed=True)
+
+        # Ordenamiento
+        if sort_by == 'title':
+            query = query.order_by(Task.title)
+        elif sort_by == 'date':
+            query = query.order_by(Task.due_date)
+        else:  # created
+            query = query.order_by(Task.id)
+
+        tasks = query.all()
 
         # Datos para pasar a la plantilla
         context = {
@@ -56,8 +72,8 @@ def register_routes(app):
             'filter_type': filter_type,
             'sort_by': sort_by,
             'total_tasks': len(tasks),
-            'pending_count': 0,
-            'completed_count': 0
+            'pending_count': Task.query.filter_by(completed=False).count(),
+            'completed_count': Task.query.filter_by(completed=True).count()
         }
 
         return render_template('task_list.html', **context)
@@ -65,96 +81,94 @@ def register_routes(app):
     
     @app.route('/tasks/new', methods=['GET', 'POST'])
     def task_create():
-        """
-        Crea una nueva tarea
-        
-        GET: Muestra el formulario de creación
-        POST: Procesa los datos del formulario y crea la tarea
-        
-        Returns:
-            str: HTML del formulario o redirección tras crear la tarea
-        """
         if request.method == 'POST':
-            pass # TODO: implementar para una solicitud POST
-        
-        # Mostrar formulario de creación
-        pass # TODO: implementar para una solicitud GET
+            title = request.form.get('title')
+            description = request.form.get('description')
+            due_date_str = request.form.get('due_date')
+
+            try:
+                due_date = datetime.strptime(due_date_str, '%Y-%m-%dT%H:%M') if due_date_str else None
+            except ValueError:
+                flash('Formato de fecha inválido', 'error')
+                return redirect(url_for('task_create'))
+
+            new_task = Task(title=title, description=description, due_date=due_date)
+            db.session.add(new_task)
+            db.session.commit()
+            flash('Tarea creada exitosamente', 'success')
+            return redirect(url_for('task_list'))
+
+        # GET: mostrar formulario vacío
+        return render_template('task_form.html', task=None)
     
     
     @app.route('/tasks/<int:task_id>')
     def task_detail(task_id):
-        """
-        Muestra los detalles de una tarea específica
-        
-        Args:
-            task_id (int): ID de la tarea a mostrar
-        
-        Returns:
-            str: HTML con los detalles de la tarea
-        """
-        pass # TODO: implementar el método
+
+        task = Task.query.get_or_404(task_id)
+        return render_template('task_detail.html', task=task)
     
     
     @app.route('/tasks/<int:task_id>/edit', methods=['GET', 'POST'])
     def task_edit(task_id):
         """
         Edita una tarea existente
-        
-        Args:
-            task_id (int): ID de la tarea a editar
-        
-        GET: Muestra el formulario de edición con datos actuales
-        POST: Procesa los cambios y actualiza la tarea
-        
-        Returns:
-            str: HTML del formulario o redirección tras editar
+
         """
+        task = Task.query.get_or_404(task_id)
+
         if request.method == 'POST':
-            pass # TODO: implementar para una solicitud POST
-        
-        # Mostrar el formulario para editar la tarea
-        pass # TODO: implementar para una solicitud GET
+            task.title = request.form.get('title')
+            task.description = request.form.get('description')
+            due_date_str = request.form.get('due_date')
+            # completed field will be updated below based on checkbox
+            task.completed = bool(request.form.get('completed'))
+
+            # Validar fecha
+            try:
+                task.due_date = datetime.strptime(due_date_str, '%Y-%m-%dT%H:%M') if due_date_str else None
+            except ValueError:
+                flash('Formato de fecha inválido', 'error')
+                return redirect(url_for('task_edit', task_id=task.id))
+
+            db.session.commit()
+            flash('Tarea actualizada exitosamente', 'success')
+            return redirect(url_for('task_list'))
+
+        # GET: mostrar formulario con datos actuales
+        return render_template('task_form.html', task=task)
     
     
     @app.route('/tasks/<int:task_id>/delete', methods=['POST'])
     def task_delete(task_id):
         """
         Elimina una tarea
-        
-        Args:
-            task_id (int): ID de la tarea a eliminar
-        
-        Returns:
-            Response: Redirección a la lista de tareas
+
         """
-        pass # TODO: implementar el método
+        task = Task.query.get_or_404(task_id)
+        db.session.delete(task)
+        db.session.commit()
+        flash('Tarea eliminada', 'success')
+        return redirect(url_for('task_list'))
     
     
     @app.route('/tasks/<int:task_id>/toggle', methods=['POST'])
     def task_toggle(task_id):
         """
         Cambia el estado de completado de una tarea
-        
-        Args:
-            task_id (int): ID de la tarea a cambiar
-        
-        Returns:
-            Response: Redirección a la lista de tareas
+
         """
-        pass # TODO: implementar el método
+        task = Task.query.get_or_404(task_id)
+        task.completed = not task.completed
+        db.session.commit()
+        return redirect(url_for('task_list'))
     
     
     # Rutas adicionales para versiones futuras
     
     @app.route('/api/tasks', methods=['GET'])
     def api_tasks():
-        """
-        API endpoint para obtener tareas en formato JSON
-        (Para versiones futuras con JavaScript)
-        
-        Returns:
-            json: Lista de tareas en formato JSON
-        """
+
         # TODO: para versiones futuras
         return jsonify({
             'tasks': [],
